@@ -4,7 +4,9 @@ import 'package:offnote/services/database_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await DatabaseService.instance.database;
+
+  final db = DatabaseService();
+  await db.database;
 
   runApp(const MyApp());
 }
