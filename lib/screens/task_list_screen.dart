@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:offnote/models/task.dart';
-import 'package:offnote/services/task_list_service.dart';
+import 'package:offnote/providers/connectivity_provider.dart';
+import 'package:offnote/providers/task_provider.dart';
+import 'package:offnote/screens/task_form_screen.dart';
 import 'package:offnote/widgets/task_tile.dart';
 import 'package:offnote/widgets/add_task_button.dart';
 import 'package:offnote/widgets/connectivity_indicator.dart';
@@ -15,20 +18,7 @@ class TaskListScreen extends StatefulWidget {
 }
 
 class _TaskListScreenState extends State<TaskListScreen> {
-  final TaskLocalService _taskService = TaskLocalService();
   final TextEditingController _searchController = TextEditingController();
-
-  List<Task> _allTasks = [];
-  List<Task> _filteredTasks = [];
-  String _selectedFilter = 'All';
-  bool _isLoading = true;
-  bool _isOnline = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadTasks();
-  }
 
   @override
   void dispose() {
@@ -36,220 +26,326 @@ class _TaskListScreenState extends State<TaskListScreen> {
     super.dispose();
   }
 
-  Future<void> _loadTasks() async {
-    setState(() => _isLoading = true);
-
-    try {
-      final tasks = await _taskService.getTasks();
-      setState(() {
-        _allTasks = tasks;
-        _applyFilters();
-        _isLoading = false;
-      });
-    } catch (e) {
-      setState(() => _isLoading = false);
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Erreur: $e')));
-      }
-    }
-  }
-
-  void _applyFilters() {
-    List<Task> filtered = _allTasks;
-
-    // Filtrer par statut
-    if (_selectedFilter == 'Active') {
-      filtered = filtered.where((task) => !task.completed).toList();
-    } else if (_selectedFilter == 'Completed') {
-      filtered = filtered.where((task) => task.completed).toList();
-    }
-
-    // Filtrer par recherche
-    final searchQuery = _searchController.text.toLowerCase();
-    if (searchQuery.isNotEmpty) {
-      filtered = filtered.where((task) {
-        return task.title.toLowerCase().contains(searchQuery) ||
-            (task.description?.toLowerCase().contains(searchQuery) ?? false);
-      }).toList();
-    }
-
-    // Trier par date de mise à jour (plus récent en premier)
-    filtered.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-
-    setState(() {
-      _filteredTasks = filtered;
-    });
+  void _onSearchChanged(String query) {
+    context.read<TaskProvider>().setSearchQuery(query);
   }
 
   void _onFilterChanged(String filter) {
-    setState(() {
-      _selectedFilter = filter;
-      _applyFilters();
-    });
+    context.read<TaskProvider>().setFilter(filter);
   }
 
-  void _onSearchChanged(String query) {
-    _applyFilters();
-  }
+  Future<void> _toggleTaskCompletion(Task task, bool isOnline) async {
+    final provider = context.read<TaskProvider>();
+    final success = await provider.toggleTaskCompletion(
+      task,
+      isOnline: isOnline,
+    );
 
-  Future<void> _toggleTaskCompletion(Task task) async {
-    try {
-      final updatedTask = Task(
-        userId: task.userId,
-        id: task.id,
-        title: task.title,
-        completed: !task.completed,
-        description: task.description,
-        dueDate: task.dueDate,
-        priority: task.priority,
-        tags: task.tags,
-        isSynced: false,
-        updatedAt: DateTime.now(),
+    if (!mounted) return;
+
+    if (success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            task.completed
+                ? 'Tâche marquée comme active'
+                : 'Tâche marquée comme terminée',
+          ),
+          duration: const Duration(seconds: 1),
+        ),
       );
-
-      await _taskService.updateTask(updatedTask);
-      await _loadTasks();
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Erreur: $e')));
-      }
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erreur: ${provider.errorMessage ?? "Inconnu"}'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
-  void _navigateToAddTask() {
+  Future<void> _deleteTask(Task task, bool isOnline) async {
+    final provider = context.read<TaskProvider>();
+    final success = await provider.deleteTask(task, isOnline: isOnline);
+
+    if (!mounted) return;
+
+    if (success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${task.title} supprimée'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Erreur: ${provider.errorMessage ?? "Inconnu"}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _syncTasks(bool isOnline) async {
+    if (!isOnline) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Connexion requise pour synchroniser'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    final provider = context.read<TaskProvider>();
+    final result = await provider.syncTasks(isOnline: isOnline);
+
+    if (!mounted) return;
+
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Formulaire d\'ajout à implémenter')),
+      SnackBar(
+        content: Text(result.message),
+        backgroundColor: result.success ? Colors.green : Colors.red,
+        duration: const Duration(seconds: 3),
+      ),
     );
+  }
+
+  void _navigateToAddTask() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const TaskFormScreen()),
+    );
+
+    if (result == true) {
+      context.read<TaskProvider>().loadTasks();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text(
-          "OffNote",
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadTasks,
-            tooltip: 'Actualiser',
-          ),
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: ConnectivityIndicator(isOnline: _isOnline),
-          ),
-        ],
-        elevation: 0,
-      ),
-      body: Column(
-        children: [
-          // Barre de recherche
-          Padding(
-            padding: const EdgeInsets.all(12.0),
-            child: custom.SearchBar(
-              controller: _searchController,
-              onChanged: _onSearchChanged,
+    return Consumer2<TaskProvider, ConnectivityProvider>(
+      builder: (context, taskProvider, connectivityProvider, child) {
+        final isOnline = connectivityProvider.isOnline;
+        final filteredTasks = taskProvider.filteredTasks;
+        final unsyncedCount = taskProvider.unsyncedCount;
+
+        return Scaffold(
+          appBar: AppBar(
+            title: const Text(
+              "OffNote",
+              style: TextStyle(fontWeight: FontWeight.bold),
             ),
-          ),
+            actions: [
+              // Badge de tâches non synchronisées
+              if (unsyncedCount > 0)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.shade100,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: Colors.orange.shade300,
+                          width: 1,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.sync_problem,
+                            size: 16,
+                            color: Colors.orange.shade700,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            '$unsyncedCount',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.orange.shade700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
 
-          // Filtres
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: TaskFilterChips(
-              selectedFilter: _selectedFilter,
-              onSelected: _onFilterChanged,
-            ),
-          ),
-
-          const SizedBox(height: 10),
-
-          // Liste des tâches
-          Expanded(
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : _filteredTasks.isEmpty
-                ? _buildEmptyState()
-                : ListView.builder(
-                    itemCount: _filteredTasks.length,
-                    padding: const EdgeInsets.only(bottom: 80),
-                    itemBuilder: (context, index) {
-                      final task = _filteredTasks[index];
-                      return Dismissible(
-                        key: Key(task.id.toString()),
-                        direction: DismissDirection.endToStart,
-                        background: Container(
-                          alignment: Alignment.centerRight,
-                          padding: const EdgeInsets.only(right: 20),
-                          color: Colors.red,
-                          child: const Icon(
-                            Icons.delete,
-                            color: Colors.white,
-                            size: 32,
+              // Bouton de synchronisation
+              IconButton(
+                icon: taskProvider.isSyncing
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            Colors.white,
                           ),
                         ),
-                        confirmDismiss: (direction) async {
-                          return await showDialog(
-                            context: context,
-                            builder: (context) => AlertDialog(
-                              title: const Text('Confirmer la suppression'),
-                              content: const Text(
-                                'Voulez-vous vraiment supprimer cette tâche ?',
-                              ),
-                              actions: [
-                                TextButton(
-                                  onPressed: () =>
-                                      Navigator.pop(context, false),
-                                  child: const Text('Annuler'),
-                                ),
-                                TextButton(
-                                  onPressed: () => Navigator.pop(context, true),
-                                  child: const Text(
-                                    'Supprimer',
-                                    style: TextStyle(color: Colors.red),
-                                  ),
-                                ),
-                              ],
+                      )
+                    : const Icon(Icons.sync),
+                onPressed: taskProvider.isSyncing
+                    ? null
+                    : () => _syncTasks(isOnline),
+                tooltip: 'Synchroniser',
+              ),
+
+              // Indicateur de connectivité
+              Padding(
+                padding: const EdgeInsets.only(right: 12),
+                child: ConnectivityIndicator(isOnline: isOnline),
+              ),
+            ],
+            elevation: 0,
+          ),
+          body: Column(
+            children: [
+              // Bannière d'information sur le mode offline
+              if (!isOnline)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  color: Colors.orange.shade50,
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.wifi_off,
+                        color: Colors.orange.shade700,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Mode offline - Les modifications seront synchronisées plus tard',
+                          style: TextStyle(
+                            color: Colors.orange.shade700,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+              // Barre de recherche
+              Padding(
+                padding: const EdgeInsets.all(12.0),
+                child: custom.SearchBar(
+                  controller: _searchController,
+                  onChanged: _onSearchChanged,
+                ),
+              ),
+
+              // Filtres
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: TaskFilterChips(
+                  selectedFilter: taskProvider.selectedFilter,
+                  onSelected: _onFilterChanged,
+                ),
+              ),
+
+              const SizedBox(height: 10),
+
+              // Liste des tâches
+              Expanded(
+                child: taskProvider.isLoading
+                    ? const Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            CircularProgressIndicator(),
+                            SizedBox(height: 16),
+                            Text(
+                              'Chargement des tâches...',
+                              style: TextStyle(color: Colors.grey),
                             ),
-                          );
-                        },
-                        onDismissed: (direction) async {
-                          await _taskService.deleteTask(task.id!);
-                          await _loadTasks();
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('${task.title} supprimée'),
-                                action: SnackBarAction(
-                                  label: 'Annuler',
-                                  onPressed: () {},
+                          ],
+                        ),
+                      )
+                    : taskProvider.errorMessage != null
+                    ? _buildErrorState(taskProvider.errorMessage!)
+                    : filteredTasks.isEmpty
+                    ? _buildEmptyState(taskProvider.selectedFilter)
+                    : RefreshIndicator(
+                        onRefresh: () => taskProvider.loadTasks(),
+                        child: ListView.builder(
+                          itemCount: filteredTasks.length,
+                          padding: const EdgeInsets.only(bottom: 80),
+                          itemBuilder: (context, index) {
+                            final task = filteredTasks[index];
+                            return Dismissible(
+                              key: Key(task.id.toString()),
+                              direction: DismissDirection.endToStart,
+                              background: Container(
+                                alignment: Alignment.centerRight,
+                                padding: const EdgeInsets.only(right: 20),
+                                color: Colors.red,
+                                child: const Icon(
+                                  Icons.delete,
+                                  color: Colors.white,
+                                  size: 32,
                                 ),
+                              ),
+                              confirmDismiss: (direction) async {
+                                return await showDialog(
+                                  context: context,
+                                  builder: (context) => AlertDialog(
+                                    title: const Text(
+                                      'Confirmer la suppression',
+                                    ),
+                                    content: Text(
+                                      'Voulez-vous supprimer "${task.title}" ?',
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(context, false),
+                                        child: const Text('Annuler'),
+                                      ),
+                                      TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(context, true),
+                                        child: const Text(
+                                          'Supprimer',
+                                          style: TextStyle(color: Colors.red),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                              onDismissed: (direction) =>
+                                  _deleteTask(task, isOnline),
+                              child: GestureDetector(
+                                onTap: () =>
+                                    _toggleTaskCompletion(task, isOnline),
+                                child: TaskTile(task: task),
                               ),
                             );
-                          }
-                        },
-                        child: GestureDetector(
-                          onTap: () {
-                            _toggleTaskCompletion(task);
                           },
-                          child: TaskTile(task: task),
                         ),
-                      );
-                    },
-                  ),
+                      ),
+              ),
+            ],
           ),
-        ],
-      ),
-      floatingActionButton: AddTaskButton(onPressed: _navigateToAddTask),
+          floatingActionButton: AddTaskButton(onPressed: _navigateToAddTask),
+        );
+      },
     );
   }
 
-  Widget _buildEmptyState() {
+  Widget _buildEmptyState(String selectedFilter) {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -259,9 +355,9 @@ class _TaskListScreenState extends State<TaskListScreen> {
           Text(
             _searchController.text.isNotEmpty
                 ? 'Aucune tâche trouvée'
-                : _selectedFilter == 'All'
+                : selectedFilter == 'All'
                 ? 'Aucune tâche'
-                : _selectedFilter == 'Active'
+                : selectedFilter == 'Active'
                 ? 'Aucune tâche active'
                 : 'Aucune tâche terminée',
             style: TextStyle(
@@ -276,6 +372,47 @@ class _TaskListScreenState extends State<TaskListScreen> {
             style: TextStyle(fontSize: 14, color: Colors.grey.shade500),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildErrorState(String errorMessage) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.error_outline, size: 80, color: Colors.red.shade300),
+            const SizedBox(height: 16),
+            const Text(
+              'Erreur de chargement',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Colors.red,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              errorMessage,
+              style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: () => context.read<TaskProvider>().loadTasks(),
+              icon: const Icon(Icons.refresh),
+              label: const Text('Réessayer'),
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

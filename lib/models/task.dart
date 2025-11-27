@@ -27,7 +27,6 @@ class Task {
     this.tags,
     this.isSynced = true,
     required this.updatedAt,
-
   });
 
   factory Task.fromJson(Map<String, dynamic> json) {
@@ -58,9 +57,11 @@ class Task {
       description: map['description'],
       dueDate: map['dueDate'] != null ? DateTime.parse(map['dueDate']) : null,
       priority: map['priority'] ?? 'medium',
-      tags: map['tags'] != null ? List<String>.from(jsonDecode(map['tags'])) : [],
+      tags: map['tags'] != null
+          ? List<String>.from(jsonDecode(map['tags']))
+          : [],
       isSynced: map['isSynced'] == 1,
-      updatedAt: DateTime.parse(map['updateAt']),
+      updatedAt: DateTime.parse(map['updatedAt']), // CORRIGÉ ICI
     );
   }
 
@@ -75,7 +76,7 @@ class Task {
       "priority": priority,
       "tags": tags != null ? jsonEncode(tags) : null,
       "isSynced": isSynced ? 1 : 0,
-      "updateAt": updatedAt.toIso8601String(),
+      "updatedAt": updatedAt.toIso8601String(), // CORRIGÉ ICI
     };
   }
 }
