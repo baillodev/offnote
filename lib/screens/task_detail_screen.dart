@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:offnote/screens/task_form_screen.dart';
 import 'package:provider/provider.dart';
 import 'package:offnote/models/task.dart';
 import 'package:offnote/providers/connectivity_provider.dart';
@@ -89,6 +90,21 @@ class TaskDetailScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Détails de la tâche'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.edit),
+            tooltip: 'Modifier',
+            onPressed: () async {
+              final updated = await Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => TaskFormScreen(task: task)),
+              );
+
+              if (updated == true && context.mounted) {
+                context.read<TaskProvider>().loadTasks();
+              }
+            },
+          ),
+
           IconButton(
             icon: const Icon(Icons.delete_outline),
             onPressed: () => _deleteTask(context, isOnline),
@@ -215,7 +231,11 @@ class TaskDetailScreen extends StatelessWidget {
                     task.completed
                         ? 'Marquer comme non terminée'
                         : 'Marquer comme terminée',
-                    style: TextStyle(color: task.completed ? Theme.of(context).colorScheme.primary : Colors.white),
+                    style: TextStyle(
+                      color: task.completed
+                          ? Theme.of(context).colorScheme.primary
+                          : Colors.white,
+                    ),
                   ),
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
