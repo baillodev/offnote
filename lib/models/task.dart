@@ -29,6 +29,32 @@ class Task {
     required this.updatedAt,
   });
 
+  Task copyWith({
+    int? userId,
+    int? id,
+    String? title,
+    bool? completed,
+    String? description,
+    DateTime? dueDate,
+    String? priority,
+    List<String>? tags,
+    bool? isSynced,
+    DateTime? updatedAt,
+  }) {
+    return Task(
+      userId: userId ?? this.userId,
+      id: id ?? this.id,
+      title: title ?? this.title,
+      completed: completed ?? this.completed,
+      description: description ?? this.description,
+      dueDate: dueDate ?? this.dueDate,
+      priority: priority ?? this.priority,
+      tags: tags ?? this.tags,
+      isSynced: isSynced ?? this.isSynced,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
+
   factory Task.fromJson(Map<String, dynamic> json) {
     return Task(
       userId: json['userId'] as int,

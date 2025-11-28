@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../models/task.dart';
 import '../screens/task_detail_screen.dart';
+import '../providers/connectivity_provider.dart';
+import '../providers/task_provider.dart';
 import 'priority_badge.dart';
 import 'sync_indicator.dart';
 
@@ -11,31 +14,41 @@ class TaskTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => TaskDetailScreen(task: task)),
-        );
-      },
-      child: Card(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        elevation: 2,
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+    final isOnline = context.watch<ConnectivityProvider>().isOnline;
+
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      elevation: 2,
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => TaskDetailScreen(task: task),
+            ),
+          );
+        },
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Row(
             children: [
-              // Checkbox pour statut
+              // Checkbox pour changer statut
               Checkbox(
                 value: task.completed,
-                onChanged: (value) {},
+                onChanged: (_) async {
+                  await context.read<TaskProvider>().toggleTaskCompletion(
+                        task,
+                        isOnline: isOnline,
+                      );
+                },
                 activeColor: Theme.of(context).colorScheme.primary,
               ),
 
               const SizedBox(width: 12),
 
-              // Titre et date
+              // Titre + date
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -67,6 +80,7 @@ class TaskTile extends StatelessWidget {
 
               const SizedBox(width: 12),
 
+              // Priorité + état synchro
               Column(
                 children: [
                   PriorityBadge(priority: task.priority),

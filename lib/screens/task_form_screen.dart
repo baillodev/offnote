@@ -3,11 +3,13 @@ import 'package:provider/provider.dart';
 import 'package:offnote/providers/connectivity_provider.dart';
 import 'package:offnote/providers/task_provider.dart';
 import 'package:offnote/widgets/custom_text_field.dart';
-import 'package:offnote/widgets/priority_badge.dart';
 import 'package:intl/intl.dart';
+import 'package:offnote/models/task.dart';
 
 class TaskFormScreen extends StatefulWidget {
-  const TaskFormScreen({super.key});
+  final Task? task; // <-- AJOUT POUR L'ÉDITION
+
+  const TaskFormScreen({super.key, this.task});
 
   @override
   State<TaskFormScreen> createState() => _TaskFormScreenState();
@@ -26,6 +28,21 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
   bool _isSaving = false;
 
   @override
+  void initState() {
+    super.initState();
+
+    // --- MODE ÉDITION ---
+    if (widget.task != null) {
+      final t = widget.task!;
+      _titleController.text = t.title;
+      _descriptionController.text = t.description ?? '';
+      _selectedDueDate = t.dueDate;
+      _selectedPriority = t.priority;
+      _tags.addAll(t.tags ?? []);
+    }
+  }
+
+  @override
   void dispose() {
     _titleController.dispose();
     _descriptionController.dispose();
@@ -39,7 +56,6 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
       initialDate: _selectedDueDate ?? DateTime.now(),
       firstDate: DateTime.now(),
       lastDate: DateTime.now().add(const Duration(days: 365)),
-      // Pas besoin de locale ici, c'est dans main.dart
     );
 
     if (date != null) {
@@ -75,31 +91,55 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
     final taskProvider = context.read<TaskProvider>();
     final isOnline = context.read<ConnectivityProvider>().isOnline;
 
-    final success = await taskProvider.addTask(
-      title: _titleController.text.trim(),
-      description: _descriptionController.text.trim().isEmpty
-          ? null
-          : _descriptionController.text.trim(),
-      dueDate: _selectedDueDate,
-      priority: _selectedPriority,
-      tags: _tags.isEmpty ? null : _tags,
-      isOnline: isOnline,
-    );
+    bool success = false;
 
-    setState(() {
-      _isSaving = false;
-    });
+    if (widget.task == null) {
+      // --- CRÉATION ---
+      success = await taskProvider.addTask(
+        title: _titleController.text.trim(),
+        description: _descriptionController.text.trim().isEmpty
+            ? null
+            : _descriptionController.text.trim(),
+        dueDate: _selectedDueDate,
+        priority: _selectedPriority,
+        tags: _tags.isEmpty ? null : _tags,
+        isOnline: isOnline,
+      );
+    } else {
+      // --- MISE À JOUR ---
+      final updatedTask = widget.task!.copyWith(
+        title: _titleController.text.trim(),
+        description: _descriptionController.text.trim().isEmpty
+            ? null
+            : _descriptionController.text.trim(),
+        dueDate: _selectedDueDate,
+        priority: _selectedPriority,
+        tags: _tags,
+      );
+
+      success = await taskProvider.updateTask(
+        updatedTask,
+        isOnline: isOnline,
+      );
+    }
+
+    setState(() => _isSaving = false);
 
     if (!mounted) return;
 
     if (success) {
       Navigator.pop(context, true);
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            isOnline
-                ? 'Tâche créée et synchronisée'
-                : 'Tâche créée (sera synchronisée plus tard)',
+            widget.task == null
+                ? (isOnline
+                    ? 'Tâche créée et synchronisée'
+                    : 'Tâche créée (sync plus tard)')
+                : (isOnline
+                    ? 'Tâche mise à jour'
+                    : 'Modification enregistrée (sync plus tard)'),
           ),
           backgroundColor: isOnline ? Colors.green : Colors.orange,
         ),
@@ -107,7 +147,8 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Erreur: ${taskProvider.errorMessage ?? "Inconnu"}'),
+          content:
+              Text('Erreur: ${taskProvider.errorMessage ?? "Inconnue"}'),
           backgroundColor: Colors.red,
         ),
       );
@@ -117,20 +158,19 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
   @override
   Widget build(BuildContext context) {
     final isOnline = context.watch<ConnectivityProvider>().isOnline;
+    final isEditing = widget.task != null;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Nouvelle tâche'),
+        title: Text(isEditing ? 'Modifier la tâche' : 'Nouvelle tâche'),
         actions: [
           if (!isOnline)
             Padding(
               padding: const EdgeInsets.only(right: 12),
               child: Center(
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
                     color: Colors.orange.shade100,
                     borderRadius: BorderRadius.circular(12),
@@ -138,11 +178,8 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(
-                        Icons.wifi_off,
-                        size: 14,
-                        color: Colors.orange.shade700,
-                      ),
+                      Icon(Icons.wifi_off,
+                          size: 14, color: Colors.orange.shade700),
                       const SizedBox(width: 4),
                       Text(
                         'Offline',
@@ -164,7 +201,7 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            // Titre
+            // TITLE
             CustomTextField(
               label: 'Titre *',
               controller: _titleController,
@@ -178,7 +215,7 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
 
             const SizedBox(height: 16),
 
-            // Description
+            // DESCRIPTION
             CustomTextField(
               label: 'Description',
               controller: _descriptionController,
@@ -187,30 +224,29 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
 
             const SizedBox(height: 20),
 
-            // Priorité
+            // PRIORITY
             const Text(
               'Priorité',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
+
             Row(
               children: ['low', 'medium', 'high'].map((priority) {
-                final isSelected = _selectedPriority == priority;
+                final selected = _selectedPriority == priority;
                 return Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: ChoiceChip(
                     label: Text(
                       priority.toUpperCase(),
                       style: TextStyle(
-                        color: isSelected ? Colors.white : Colors.black,
+                        color: selected ? Colors.white : Colors.black,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    selected: isSelected,
-                    onSelected: (selected) {
-                      setState(() {
-                        _selectedPriority = priority;
-                      });
+                    selected: selected,
+                    onSelected: (_) {
+                      setState(() => _selectedPriority = priority);
                     },
                     selectedColor: _getPriorityColor(priority),
                     backgroundColor: Colors.grey.shade200,
@@ -221,12 +257,13 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
 
             const SizedBox(height: 20),
 
-            // Date d'échéance
+            // DUE DATE
             const Text(
               'Date d\'échéance',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
+
             InkWell(
               onTap: _selectDueDate,
               child: Container(
@@ -237,29 +274,22 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
                 ),
                 child: Row(
                   children: [
-                    Icon(
-                      Icons.calendar_today,
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
+                    Icon(Icons.calendar_today,
+                        color: Theme.of(context).colorScheme.primary),
                     const SizedBox(width: 12),
                     Text(
                       _selectedDueDate == null
                           ? 'Choisir une date'
-                          : DateFormat(
-                              'dd MMMM yyyy',
-                              'fr_FR',
-                            ).format(_selectedDueDate!),
+                          : DateFormat('dd MMMM yyyy', 'fr_FR')
+                              .format(_selectedDueDate!),
                       style: const TextStyle(fontSize: 16),
                     ),
                     const Spacer(),
                     if (_selectedDueDate != null)
                       IconButton(
                         icon: const Icon(Icons.close, size: 20),
-                        onPressed: () {
-                          setState(() {
-                            _selectedDueDate = null;
-                          });
-                        },
+                        onPressed: () =>
+                            setState(() => _selectedDueDate = null),
                       ),
                   ],
                 ),
@@ -268,12 +298,13 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
 
             const SizedBox(height: 20),
 
-            // Tags
+            // TAGS
             const Text(
               'Tags',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
+
             Row(
               children: [
                 Expanded(
@@ -282,11 +313,10 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
                     decoration: InputDecoration(
                       hintText: 'Ajouter un tag',
                       filled: true,
-                      fillColor: Theme.of(context).colorScheme.surfaceVariant,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 12,
-                      ),
+                      fillColor:
+                          Theme.of(context).colorScheme.surfaceVariant,
+                      contentPadding:
+                          const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
                         borderSide: BorderSide.none,
@@ -303,23 +333,25 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
                 ),
               ],
             ),
+
             const SizedBox(height: 8),
+
             if (_tags.isNotEmpty)
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
-                children: _tags.map((tag) {
-                  return Chip(
-                    label: Text(tag),
-                    deleteIcon: const Icon(Icons.close, size: 16),
-                    onDeleted: () => _removeTag(tag),
-                  );
-                }).toList(),
+                children: _tags
+                    .map((tag) => Chip(
+                          label: Text(tag),
+                          deleteIcon: const Icon(Icons.close, size: 16),
+                          onDeleted: () => _removeTag(tag),
+                        ))
+                    .toList(),
               ),
 
             const SizedBox(height: 32),
 
-            // Bouton de sauvegarde
+            // SAVE BUTTON
             SizedBox(
               height: 50,
               child: ElevatedButton(
@@ -333,14 +365,13 @@ class _TaskFormScreenState extends State<TaskFormScreen> {
                         width: 20,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                            Colors.white,
-                          ),
+                          valueColor:
+                              AlwaysStoppedAnimation<Color>(Colors.white),
                         ),
                       )
-                    : const Text(
-                        'Créer la tâche',
-                        style: TextStyle(
+                    : Text(
+                        isEditing ? 'Mettre à jour' : 'Créer la tâche',
+                        style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
                           color: Colors.white,
