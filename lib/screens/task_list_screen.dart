@@ -20,7 +20,6 @@ class TaskListScreen extends StatefulWidget {
 class _TaskListScreenState extends State<TaskListScreen>
     with TickerProviderStateMixin {
   final TextEditingController _searchController = TextEditingController();
-
   bool _sortAscending = true;
 
   @override
@@ -41,13 +40,17 @@ class _TaskListScreenState extends State<TaskListScreen>
     setState(() {
       _sortAscending = !_sortAscending;
     });
-    context.read<TaskProvider>().sortTasks(_sortAscending);
+    // Change le mode de tri dans le provider
+    final newMode = _sortAscending ? 'alpha' : 'updated_desc';
+    context.read<TaskProvider>().setSortMode(newMode);
   }
 
   Future<void> _toggleTaskCompletion(Task task, bool isOnline) async {
     final provider = context.read<TaskProvider>();
-    final success =
-        await provider.toggleTaskCompletion(task, isOnline: isOnline);
+    final success = await provider.toggleTaskCompletion(
+      task,
+      isOnline: isOnline,
+    );
 
     if (!mounted) return;
 
@@ -146,16 +149,14 @@ class _TaskListScreenState extends State<TaskListScreen>
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
             actions: [
-              // TRI bouton
+              // Bouton de tri
               IconButton(
-                icon: Icon(
-                  _sortAscending ? Icons.sort_by_alpha : Icons.sort,
-                ),
+                icon: Icon(_sortAscending ? Icons.sort_by_alpha : Icons.sort),
                 tooltip: "Trier les tâches",
                 onPressed: _toggleSort,
               ),
 
-              // Badge non synchronisé
+              // Badge de tâches non synchronisées
               if (unsyncedCount > 0)
                 Padding(
                   padding: const EdgeInsets.only(right: 8),
@@ -176,8 +177,11 @@ class _TaskListScreenState extends State<TaskListScreen>
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.sync_problem,
-                              size: 16, color: Colors.orange.shade700),
+                          Icon(
+                            Icons.sync_problem,
+                            size: 16,
+                            color: Colors.orange.shade700,
+                          ),
                           const SizedBox(width: 4),
                           Text(
                             '$unsyncedCount',
@@ -193,7 +197,7 @@ class _TaskListScreenState extends State<TaskListScreen>
                   ),
                 ),
 
-              // Synchronisation
+              // Bouton de synchronisation
               IconButton(
                 icon: taskProvider.isSyncing
                     ? const SizedBox(
@@ -201,8 +205,9 @@ class _TaskListScreenState extends State<TaskListScreen>
                         height: 20,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
-                          valueColor:
-                              AlwaysStoppedAnimation<Color>(Colors.white),
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            Colors.white,
+                          ),
                         ),
                       )
                     : const Icon(Icons.sync),
@@ -212,16 +217,17 @@ class _TaskListScreenState extends State<TaskListScreen>
                 tooltip: 'Synchroniser',
               ),
 
+              // Indicateur de connectivité
               Padding(
                 padding: const EdgeInsets.only(right: 12),
                 child: ConnectivityIndicator(isOnline: isOnline),
-              )
+              ),
             ],
+            elevation: 0,
           ),
-
           body: Column(
             children: [
-              // Offline banner
+              // Bannière mode offline
               if (!isOnline)
                 Container(
                   width: double.infinity,
@@ -229,8 +235,11 @@ class _TaskListScreenState extends State<TaskListScreen>
                   color: Colors.orange.shade50,
                   child: Row(
                     children: [
-                      Icon(Icons.wifi_off,
-                          color: Colors.orange.shade700, size: 20),
+                      Icon(
+                        Icons.wifi_off,
+                        color: Colors.orange.shade700,
+                        size: 20,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
@@ -266,7 +275,7 @@ class _TaskListScreenState extends State<TaskListScreen>
 
               const SizedBox(height: 10),
 
-              // LISTE AVEC ANIMATIONS 🔥
+              // Liste des tâches avec animations
               Expanded(
                 child: AnimatedSwitcher(
                   duration: const Duration(milliseconds: 300),
@@ -275,7 +284,6 @@ class _TaskListScreenState extends State<TaskListScreen>
               ),
             ],
           ),
-
           floatingActionButton: AddTaskButton(onPressed: _navigateToAddTask),
         );
       },
@@ -289,6 +297,7 @@ class _TaskListScreenState extends State<TaskListScreen>
   ) {
     if (provider.isLoading) {
       return const Center(
+        key: ValueKey('loading'),
         child: CircularProgressIndicator(),
       );
     }
@@ -304,6 +313,7 @@ class _TaskListScreenState extends State<TaskListScreen>
     return RefreshIndicator(
       onRefresh: () => provider.loadTasks(),
       child: ListView.builder(
+        key: const ValueKey('task-list'),
         itemCount: tasks.length,
         padding: const EdgeInsets.only(bottom: 80),
         itemBuilder: (context, index) {
@@ -313,18 +323,19 @@ class _TaskListScreenState extends State<TaskListScreen>
             opacity: 1,
             duration: Duration(milliseconds: 300 + (index * 40)),
             child: SlideTransition(
-              position: Tween<Offset>(
-                begin: const Offset(0, 0.2),
-                end: Offset.zero,
-              ).animate(
-                CurvedAnimation(
-                  parent: AnimationController(
-                    vsync: this,
-                    duration: Duration(milliseconds: 300 + (index * 40)),
-                  )..forward(),
-                  curve: Curves.easeOut,
-                ),
-              ),
+              position:
+                  Tween<Offset>(
+                    begin: const Offset(0, 0.2),
+                    end: Offset.zero,
+                  ).animate(
+                    CurvedAnimation(
+                      parent: AnimationController(
+                        vsync: this,
+                        duration: Duration(milliseconds: 300 + (index * 40)),
+                      )..forward(),
+                      curve: Curves.easeOut,
+                    ),
+                  ),
               child: Dismissible(
                 key: Key(task.id.toString()),
                 direction: DismissDirection.endToStart,
@@ -332,7 +343,11 @@ class _TaskListScreenState extends State<TaskListScreen>
                   alignment: Alignment.centerRight,
                   padding: const EdgeInsets.only(right: 20),
                   color: Colors.red,
-                  child: const Icon(Icons.delete, color: Colors.white, size: 32),
+                  child: const Icon(
+                    Icons.delete,
+                    color: Colors.white,
+                    size: 32,
+                  ),
                 ),
                 confirmDismiss: (direction) async {
                   return await showDialog(
@@ -347,8 +362,10 @@ class _TaskListScreenState extends State<TaskListScreen>
                         ),
                         TextButton(
                           onPressed: () => Navigator.pop(context, true),
-                          child: const Text('Supprimer',
-                              style: TextStyle(color: Colors.red)),
+                          child: const Text(
+                            'Supprimer',
+                            style: TextStyle(color: Colors.red),
+                          ),
                         ),
                       ],
                     ),
@@ -369,6 +386,7 @@ class _TaskListScreenState extends State<TaskListScreen>
 
   Widget _buildEmptyState(String selectedFilter) {
     return Center(
+      key: const ValueKey('empty'),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
@@ -378,10 +396,10 @@ class _TaskListScreenState extends State<TaskListScreen>
             _searchController.text.isNotEmpty
                 ? 'Aucune tâche trouvée'
                 : selectedFilter == 'All'
-                    ? 'Aucune tâche'
-                    : selectedFilter == 'Active'
-                        ? 'Aucune tâche active'
-                        : 'Aucune tâche terminée',
+                ? 'Aucune tâche'
+                : selectedFilter == 'Active'
+                ? 'Aucune tâche active'
+                : 'Aucune tâche terminée',
             style: TextStyle(
               fontSize: 18,
               color: Colors.grey.shade600,
@@ -400,6 +418,7 @@ class _TaskListScreenState extends State<TaskListScreen>
 
   Widget _buildErrorState(String errorMessage) {
     return Center(
+      key: const ValueKey('error'),
       child: Padding(
         padding: const EdgeInsets.all(24.0),
         child: Column(
@@ -426,6 +445,12 @@ class _TaskListScreenState extends State<TaskListScreen>
               onPressed: () => context.read<TaskProvider>().loadTasks(),
               icon: const Icon(Icons.refresh),
               label: const Text('Réessayer'),
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
+              ),
             ),
           ],
         ),

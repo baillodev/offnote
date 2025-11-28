@@ -26,30 +26,29 @@ class TaskProvider extends ChangeNotifier {
   String? _errorMessage;
   String? get errorMessage => _errorMessage;
 
-  // Filtre
-  String _selectedFilter = 'All';
+  // Filtres et recherche
+  String _selectedFilter = 'All'; // 'All', 'Active', 'Completed'
   String get selectedFilter => _selectedFilter;
 
-  // Recherche
   String _searchQuery = '';
   String get searchQuery => _searchQuery;
 
   // Tri
-  String _sortMode = 'updated_desc'; // updated_desc / updated_asc / alpha
+  String _sortMode = 'updated_desc'; // 'updated_desc', 'updated_asc', 'alpha'
   String get sortMode => _sortMode;
 
-  // Tâches filtrées + triées
+  // Tâches filtrées et triées
   List<Task> get filteredTasks {
-    List<Task> filtered = [..._tasks];
+    List<Task> filtered = _tasks;
 
-    // Filtrage par statut
+    // Filtre par statut
     if (_selectedFilter == 'Active') {
-      filtered = filtered.where((t) => !t.completed).toList();
+      filtered = filtered.where((task) => !task.completed).toList();
     } else if (_selectedFilter == 'Completed') {
-      filtered = filtered.where((t) => t.completed).toList();
+      filtered = filtered.where((task) => task.completed).toList();
     }
 
-    // Recherche
+    // Filtre par recherche
     if (_searchQuery.isNotEmpty) {
       final query = _searchQuery.toLowerCase();
       filtered = filtered.where((task) {
@@ -64,6 +63,7 @@ class TaskProvider extends ChangeNotifier {
     return filtered;
   }
 
+  // Nombre de tâches non synchronisées
   int get unsyncedCount => _tasks.where((t) => !t.isSynced).length;
 
   late final StreamSubscription _syncSubscription;
@@ -75,23 +75,20 @@ class TaskProvider extends ChangeNotifier {
   }) : _apiService = apiService,
        _localService = localService,
        _syncService = syncService {
+    // Écouter les changements de statut de sync
     _syncSubscription = _syncService.syncStatusStream.listen((status) {
       _isSyncing = status == SyncStatus.syncing;
       notifyListeners();
     });
   }
 
+  /// Change le mode de tri
   void setSortMode(String mode) {
     _sortMode = mode;
     notifyListeners();
   }
 
-  void sortTasks(bool ascending) {
-    _sortMode = ascending ? 'alpha' : 'updated_desc';
-    _tasks = _applySorting(_tasks);
-    notifyListeners();
-  }
-
+  /// Applique le tri sur une liste de tâches
   List<Task> _applySorting(List<Task> list) {
     final sorted = [...list];
 
@@ -114,48 +111,62 @@ class TaskProvider extends ChangeNotifier {
     return sorted;
   }
 
+  /// Initialise les données au démarrage de l'app
   Future<void> initializeData() async {
     _setLoading(true);
     _errorMessage = null;
 
     try {
+      // 1. Charger depuis la base locale d'abord
       _tasks = await _localService.getTasks();
-      notifyListeners();
+      print('${_tasks.length} tâches chargées depuis la base locale');
+      notifyListeners(); // Afficher immédiatement les données locales
 
+      // 2. Si la base locale est vide, charger depuis l'API
       if (_tasks.isEmpty) {
+        print('Base locale vide, chargement depuis l\'API...');
         try {
           final apiTasks = await _apiService.getTasks(limit: 20);
+          print('${apiTasks.length} tâches récupérées depuis l\'API');
 
+          // Sauvegarder dans la base locale
           for (final task in apiTasks) {
             await _localService.addTask(task);
           }
 
           _tasks = apiTasks;
+          print('Données initiales sauvegardées localement');
         } catch (e) {
+          print('Erreur lors du chargement depuis l\'API: $e');
           _errorMessage = 'Impossible de charger les données depuis l\'API';
         }
       }
     } catch (e) {
       _errorMessage = 'Erreur d\'initialisation: $e';
+      print('$_errorMessage');
     } finally {
       _setLoading(false);
     }
   }
 
+  /// Charge les tâches depuis la base locale
   Future<void> loadTasks() async {
     _setLoading(true);
     _errorMessage = null;
 
     try {
       _tasks = await _localService.getTasks();
+      print('${_tasks.length} tâches chargées depuis la base locale');
       notifyListeners();
     } catch (e) {
       _errorMessage = 'Erreur de chargement: $e';
+      print('$_errorMessage');
     } finally {
       _setLoading(false);
     }
   }
 
+  /// Ajoute une nouvelle tâche
   Future<bool> addTask({
     required String title,
     String? description,
@@ -181,10 +192,23 @@ class TaskProvider extends ChangeNotifier {
         try {
           final createdTask = await _apiService.createTask(newTask);
 
-          final synced = newTask.copyWith(id: createdTask.id, isSynced: true);
+          // Créer une nouvelle Task avec l'ID de l'API et isSynced = true
+          final synced = Task(
+            userId: createdTask.userId,
+            id: createdTask.id,
+            title: title,
+            completed: false,
+            description: description,
+            dueDate: dueDate,
+            priority: priority,
+            tags: tags ?? [],
+            isSynced: true,
+            updatedAt: DateTime.now(),
+          );
 
           await _localService.addTask(synced);
           _tasks.add(synced);
+          print('Tâche créée et synchronisée: ${synced.id}');
         } catch (e) {
           await _localService.addTask(newTask);
           await _syncService.addPendingOperation(
@@ -193,6 +217,7 @@ class TaskProvider extends ChangeNotifier {
             data: newTask.toMap(),
           );
           _tasks.add(newTask);
+          print('Tâche créée localement (sync en attente): $e');
         }
       } else {
         await _localService.addTask(newTask);
@@ -202,55 +227,104 @@ class TaskProvider extends ChangeNotifier {
           data: newTask.toMap(),
         );
         _tasks.add(newTask);
+        print('Tâche créée offline (sync en attente)');
       }
 
       notifyListeners();
       return true;
     } catch (e) {
       _errorMessage = 'Erreur lors de l\'ajout: $e';
+      print('$_errorMessage');
       return false;
     }
   }
 
+  /// Met à jour une tâche existante
   Future<bool> updateTask(Task task, {required bool isOnline}) async {
     try {
-      final updated = task.copyWith(updatedAt: DateTime.now(), isSynced: false);
+      final updatedTask = Task(
+        userId: task.userId,
+        id: task.id,
+        title: task.title,
+        completed: task.completed,
+        description: task.description,
+        dueDate: task.dueDate,
+        priority: task.priority,
+        tags: task.tags,
+        isSynced: false,
+        updatedAt: DateTime.now(),
+      );
 
       if (isOnline) {
         try {
-          await _apiService.updateTask(updated);
+          await _apiService.updateTask(updatedTask);
 
-          final synced = updated.copyWith(isSynced: true);
+          // Marquer comme synchronisé après succès de l'API
+          final syncedTask = Task(
+            userId: updatedTask.userId,
+            id: updatedTask.id,
+            title: updatedTask.title,
+            completed: updatedTask.completed,
+            description: updatedTask.description,
+            dueDate: updatedTask.dueDate,
+            priority: updatedTask.priority,
+            tags: updatedTask.tags,
+            isSynced: true,
+            updatedAt: updatedTask.updatedAt,
+          );
 
-          await _localService.updateTask(synced);
-          _updateTaskInList(synced);
+          await _localService.updateTask(syncedTask);
+          _updateTaskInList(syncedTask);
+          print('Tâche mise à jour et synchronisée: ${task.id}');
         } catch (e) {
-          await _localService.updateTask(updated);
+          await _localService.updateTask(updatedTask);
           await _syncService.addPendingOperation(
             operation: 'update',
-            taskId: updated.id,
-            data: updated.toMap(),
+            taskId: task.id,
+            data: updatedTask.toMap(),
           );
-          _updateTaskInList(updated);
+          _updateTaskInList(updatedTask);
+          print('Tâche mise à jour localement (sync en attente)');
         }
       } else {
-        await _localService.updateTask(updated);
+        await _localService.updateTask(updatedTask);
         await _syncService.addPendingOperation(
           operation: 'update',
-          taskId: updated.id,
-          data: updated.toMap(),
+          taskId: task.id,
+          data: updatedTask.toMap(),
         );
-        _updateTaskInList(updated);
+        _updateTaskInList(updatedTask);
+        print('Tâche mise à jour offline (sync en attente)');
       }
 
       notifyListeners();
       return true;
     } catch (e) {
       _errorMessage = 'Erreur lors de la mise à jour: $e';
+      print('$_errorMessage');
       return false;
     }
   }
 
+  /// Toggle le statut completed d'une tâche
+  Future<bool> toggleTaskCompletion(Task task, {required bool isOnline}) async {
+    final updatedTask = Task(
+      userId: task.userId,
+      id: task.id,
+      title: task.title,
+      completed: !task.completed,
+      description: task.description,
+      dueDate: task.dueDate,
+      priority: task.priority,
+      tags: task.tags,
+      isSynced: task.isSynced,
+      updatedAt: DateTime.now(),
+    );
+
+    return await updateTask(updatedTask, isOnline: isOnline);
+  }
+
+  /// Supprime une tâche
   Future<bool> deleteTask(Task task, {required bool isOnline}) async {
     try {
       if (task.id == null) return false;
@@ -260,6 +334,7 @@ class TaskProvider extends ChangeNotifier {
           await _apiService.deleteTask(task.id!);
           await _localService.deleteTask(task.id!);
           _tasks.removeWhere((t) => t.id == task.id);
+          print('Tâche supprimée et synchronisée: ${task.id}');
         } catch (e) {
           await _syncService.addPendingOperation(
             operation: 'delete',
@@ -267,6 +342,7 @@ class TaskProvider extends ChangeNotifier {
             data: {},
           );
           _tasks.removeWhere((t) => t.id == task.id);
+          print('Tâche marquée pour suppression (sync en attente)');
         }
       } else {
         await _localService.deleteTask(task.id!);
@@ -276,25 +352,19 @@ class TaskProvider extends ChangeNotifier {
           data: {},
         );
         _tasks.removeWhere((t) => t.id == task.id);
+        print('Tâche supprimée offline (sync en attente)');
       }
 
       notifyListeners();
       return true;
     } catch (e) {
       _errorMessage = 'Erreur lors de la suppression: $e';
+      print('$_errorMessage');
       return false;
     }
   }
 
-  Future<bool> toggleTaskCompletion(Task task, {required bool isOnline}) async {
-    final updated = task.copyWith(
-      completed: !task.completed,
-      updatedAt: DateTime.now(),
-    );
-
-    return await updateTask(updated, isOnline: isOnline);
-  }
-
+  /// Synchronise les données avec l'API
   Future<SyncResult> syncTasks({required bool isOnline}) async {
     if (!isOnline) {
       return SyncResult(success: false, message: 'Pas de connexion internet');
@@ -304,12 +374,16 @@ class TaskProvider extends ChangeNotifier {
       final result = await _syncService.syncTasks(isOnline: isOnline);
 
       if (result.success) {
+        // Recharger les tâches depuis la base locale
         await loadTasks();
       }
 
       return result;
     } catch (e) {
-      return SyncResult(success: false, message: 'Erreur: $e');
+      return SyncResult(
+        success: false,
+        message: 'Erreur de synchronisation: $e',
+      );
     }
   }
 
