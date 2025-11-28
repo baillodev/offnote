@@ -215,12 +215,16 @@ class TaskDetailScreen extends StatelessWidget {
                     task.completed
                         ? 'Marquer comme non terminée'
                         : 'Marquer comme terminée',
+                    style: TextStyle(color: task.completed ? Theme.of(context).colorScheme.primary : Colors.white),
                   ),
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     backgroundColor: task.completed
                         ? Colors.orange
                         : Theme.of(context).colorScheme.primary,
+                    iconColor: task.completed
+                        ? Theme.of(context).colorScheme.primary
+                        : Colors.white,
                   ),
                 ),
               ),
